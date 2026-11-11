@@ -74,6 +74,39 @@ The parser must print one of these JSON shapes to stdout:
 
 The scanner only needs stdout. If a parser also writes full JSON snapshots for debugging or audit, store them under `data/parser-output/{company}/`. Generated JSON artifacts must stay out of git; `.gitkeep` placeholders are the only committed exception for preserving directory structure.
 
+## Bundled generic parser: LinkedIn
+
+One parser ships with the repo because it is portal-generic, not
+company-specific: `scripts/parsers/linkedin-jobs.mjs` scans LinkedIn's guest
+job search — no account, no API key — and emits the jobs-json-v1 contract
+(documented above). Point `portals.yml` at it with the `{careers_url}`
+expansion so the search lives entirely in the user-layer config:
+
+```yaml
+- name: LinkedIn — Backend Italy
+  careers_url: https://www.linkedin.com/jobs/search?keywords=backend&location=Italy
+  scan_method: local_parser
+  parser:
+    command: node
+    script: scripts/parsers/linkedin-jobs.mjs
+    args: ["--url", "{careers_url}", "--pages", "2"]
+    format: jobs-json-v1
+  enabled: true
+```
+
+The parser reads any LinkedIn `/jobs/search` URL (rewritten internally to the
+guest `seeMoreJobPostings` fragment, 25 cards per page), or builds its own from
+`--keywords`/`--location`/`--geo` plus LinkedIn's own filters (`--posted-window
+1d|1w|1m`, `--workplace onsite,remote,hybrid`, `--experience`, `--easy-apply`).
+`--details` upgrades each card's coarse posting date to the exact JSON-LD
+`datePosted` with one extra guest request per job.
+
+The guest endpoint rate-limits aggressively: pages are throttled (default
+2500 ms + jitter) and 429s back off, but sustained bulk scans can still get
+walled mid-run — the parser emits partial results and says so on stderr. An
+`li_at` cookie (via `--cookie` or `LINKEDIN_COOKIE`) raises the ceiling; pass
+it, never log it.
+
 ## Failure Handling
 
 Local parsers run before ATS API detection. If a local parser fails and the company has a detectable Greenhouse, Ashby, or Lever API source, `scan.mjs` records the parser failure and falls back to the API path for that company instead of dropping it from the scan.
